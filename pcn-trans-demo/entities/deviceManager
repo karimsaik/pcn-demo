@@ -1,0 +1,446 @@
+/**
+  * The deviceManager executes CRUD operations on devices
+  */
+
+var log = require("log");
+log.setLevel("INFO");
+
+// Get an instance of your custom store called "eurotech"
+var document = require("document");
+var eurotechStore = document.getInstance("eurotech");
+var util = require("../util");
+var config = require("../config");
+
+const LOCATION_SPLITTER = ",";
+
+// schemas names
+var event_schema="eurotech_event";
+var alert_schema="eurotech_alert";
+var latest_event_schema="eurotech_latest_event";
+
+/**
+ * This function handles the received EDC messages. It simply creates a data structure containing a device id 
+ * and the actual received payload, which is should then delegate to functions implementing some business logic. 
+ */
+function execute(message) {
+
+    try {
+        var msgParts = message.topic.split("/");
+        var data = {
+
+            deviceId: msgParts[1],
+            payload: message.payload
+        }; 
+
+        // transform the data into the structure that is expected by the current application
+        var event = {
+
+            id: data.deviceId,
+            location: Number(data.payload.position.latitude).toFixed(4) + "," + Number(data.payload.position.longitude).toFixed(4)           
+        };
+
+        if (data.payload.position.speed) {
+            event.speed =  data.payload.position.speed 
+        }
+
+        for (var i = 0; data.payload.metric && i < data.payload.metric.length; i++) {
+            event[data.payload.metric[i].name.toLowerCase()] = data.payload.metric[i].int_value // this code assumes all values are of type int
+        }
+
+        // invoke some data persistence method or any other method implementing some business logic
+        createDeviceEvent(event);
+    }catch(exception) {
+        log.error("deviceManager.execute: Could not handle receive message.\n"  +  JSON.stringify(exception));
+    }
+}
+
+/**
+ * @function deleteDevice
+ * @param {String} [id] the device id to be deleted
+ * @return {void}
+ * @throw {error} in case if the id not sent
+ */
+function deleteDevice(id) {
+
+    if(!id){
+        throw "id is empty"
+    }
+
+    var data = getDeviceData(id);
+    for(var x in data){
+        eurotechStore.delete(x.key);
+    }
+}
+
+/**
+ * @function createDeviceAlert
+ * @param {object} [entry] the data to be processed 
+ * @param {object} [entry.location] the location of the device
+ * @param {Number} [entry.speed] the speed as measured by the device (optional)
+ * @param {Number} [entry.absoluteout] the number of passengers out (optional)
+ * @param {Number} [entry.absolutein] the number of passengers in (optional)
+ * @param {Number} [entry.absolutepop] the total number of passengers (optional)
+ * @param {String} [entry.alert_type] the alert type
+ * @param {String} [entry.alert_info] the alert msg
+ * @param {String} [entry.id] the device id
+ * @return {Object} the operation response
+ * @throw {error} in case the id not sent
+ */
+function createDeviceAlert(entry) {
+
+    if(!entry || !entry.id){
+        throw "entry or entry.id is empty"
+    }
+
+    entry["meta.schema"] = alert_schema;
+    return eurotechStore.create(entry) ;
+}
+/**
+ * NOTE: if absoluteout, absolutein,absolutepop, speed are not provided, we keep the last know values, with the new location
+ * @function saveDeviceLatestEvent
+ * @param {object} [entry] the data to be processed 
+ * @param {object} [entry.location] the location of the device
+ * @param {Number} [entry.speed] the speed as measured by the device (optional)
+ * @param {Number} [entry.absoluteout] the number of passengers out (optional)
+ * @param {Number} [entry.absolutein] the number of passengers in (optional)
+ * @param {Number} [entry.absolutepop] the total number of passengers (optional)
+ * @param {String} [entry.id] the device id
+ * @return {boolean} the operation result
+ * @throw {error} in case the id not sent
+ */
+function saveDeviceLatestEvent(entry){
+
+    if(!entry || !entry.id){
+        throw "entry or entry.id is empty"
+    }
+
+    //update latest event document
+    var latestEvent={};
+    for(x in entry){
+        latestEvent[x]=entry[x];
+    }  
+
+    latestEvent["meta.schema"] = latest_event_schema;
+    latestEvent.key = latest_event_schema + "_" + latestEvent.id;
+    log.info("About to save: " + JSON.stringify(latestEvent));
+    var latesteventUpdated = eurotechStore.save(latestEvent);
+    if(!latesteventUpdated || ( latesteventUpdated.metadata.status!="success")){
+        log.error("update latest event error : " +  JSON.stringify(latesteventUpdated));
+    }
+
+    return latesteventUpdated;
+}
+
+/** 
+ * @function createDeviceEvent
+ * @param {object} [entry] the data to be processed 
+ * @param {object} [entry.location] the location of the device
+ * @param {Number} [entry.speed] the speed as measured by the device (optional)
+ * @param {Number} [entry.absoluteout] the number of passengers out (optional)
+ * @param {Number} [entry.absolutein] the number of passengers in (optional)
+ * @param {Number} [entry.absolutepop] the total number of passengers (optional) (if not provided, use last known value if available)
+ * @param {String} [entry.id] the device id
+ * @return {Object} the operation response
+ * @throw {error} in case the id not sent
+ */
+function createDeviceEvent(entry) {
+
+    if(!entry || !entry.id){
+        throw "entry or entry.id is empty"
+    }
+
+    // determine if this is a new trip. If so, update the trip id, otherwise, use last trip id
+    var tripInfo = getTripInfo(entry.id);
+    entry.tripId = tripInfo.isNew ? Number(tripInfo.tripId) + 1 : tripInfo.tripId;
+
+    //update latest event document
+    saveDeviceLatestEvent(entry);  
+    
+    // if aboslutepop is not provided, reuse last known value if available
+    if (!entry.absolutepop) {
+        entry.absolutepop = getLastKnowAbsolutePop(entry.id);
+    }
+        
+    entry["meta.schema"] = event_schema;
+    return eurotechStore.create(entry) ;
+}
+
+/**
+ * @function getDeviceData
+ * @param {String} [id] the device id
+ * @return {Array} all the device data (latestEvent, historicalEvents, Alerts)
+ * @throw {error} in case the id not sent
+ */
+function getDeviceData(id){
+
+    if(!id){
+        throw "id is empty"
+    }
+
+    var result = eurotechStore.query({"query":'id="' + id + '"',fields:"*"});
+    if(result && result.metadata.status == "success"){
+        return result.result.documents;
+    } else{
+        return null;
+    }   
+}
+
+/**
+ * @function getDeviceEvents
+ * @param {String} [id] the device id
+ * @param {String} [tripId]: if specified, only returns the event that occurred during this trip (optional)
+ * @return {Array}  the device data historicalEvents
+ * @throw {error} in case the id not sent
+ */
+
+function getDeviceEvents(id, tripId){
+
+    if(!id){
+        throw "id is empty"
+    }
+
+    var queryStr = 'id="' + id + '" and schema = "' + event_schema + '"';
+    if (tripId) {
+        queryStr += " and tripId<numeric>=" + tripId; 
+    }
+    
+    var query = {
+        
+        query: queryStr,
+        fields:"*"
+    };  
+    
+	log.info("query " + JSON.stringify(query));
+    var result = eurotechStore.query(query);    
+    if(result && result.metadata.status=="success"){
+        return result.result.documents;
+    } else{
+        return null;
+    }  
+}
+
+/**
+ * @function getAllEvents
+ * @return {Array}  all the historicalEvents
+ */
+function getAllEvents(){
+
+    var result = eurotechStore.query(
+        {"query":'schema = "' + event_schema + '"',fields:"*"}
+    );
+
+    if(result && result.metadata.status=="success"){
+        return result.result.documents;
+    } else{
+        return null;
+    }  
+}
+
+/**
+ * @param {String} id: a device id
+ * @return {Number} last known value of the absolutepop measurement for the device
+ */
+function getLastKnowAbsolutePop(id) {
+    
+    var queryStr = 'id="' + id + '" and schema = "' + event_schema + '" and absolutepop<numeric> is not null';
+    var query = {
+        
+        query: queryStr,
+        fields:"absolutepop"
+    };  
+    
+    var resp = eurotechStore.query(query);
+    if(resp && resp.metadata.status=="success"){
+        return resp.result.documents[0].absolutepop;
+    } else{
+        return null;
+    }  
+}
+
+/**
+ * @function getTripsByDevice
+ * @param {String} id: device id, optional
+ * @return {Object}  trips data by devices
+ */
+function getTripsByDevice(id) {
+    
+    var data = id ? getDeviceEvents(id) : getAllEvents();
+    var obj = {};
+    for (var i = 0; data && i < data.length; i++) {
+        
+        var deviceId = data[i].id;
+        var tripId = data[i].tripId;
+        if (!obj[deviceId]) {
+            obj[deviceId] = {
+                order:[],
+                source: "simulator"
+            };
+        }
+        
+        if (!obj[deviceId][tripId]) {
+            obj[deviceId][tripId] = [];
+        }
+        
+        var location = data[i].location.split(LOCATION_SPLITTER); 
+        var tripData = {
+            
+            lat: {
+                value: location[0]
+            },
+            long: {
+                value: location[1]
+            },
+            speed: {
+                value: data[i].speed
+            },
+            absolutein: {
+                value: data[i].absolutein,
+                description: "Passengers who got on the bus"
+            },
+            absoluteout: {
+                value: data[i].absoluteout,
+                description: "Passengers who got off the bus"
+            },
+            absolutepop: {
+                value: data[i].absolutepop,
+                description: "Passengers currently on the bus"
+            },
+            time: {
+                value: data[i].lastModifiedDate
+            }
+        };
+        
+        if (obj[deviceId].order.indexOf(tripId) == -1) {
+            obj[deviceId].order.unshift(tripId);
+        }
+        
+        obj[deviceId][tripId].push(tripData);       
+    }
+
+    return obj;
+}
+
+/**
+ * @function getDeviceAlerts
+ * @param {String} [id] the device id
+ * @return {Array}  the device data alerts
+ * @throw {error} in case the id not sent
+ */
+function getDeviceAlerts(id){
+
+    if(!id){
+        throw "id is empty"
+    }
+
+    var result = eurotechStore.query(
+        {"query":'id="' + id + '" and schema = "' + alert_schema + '"',fields:"*"}
+    );
+
+    if(result && result.metadata.status=="success"){
+        return result.result.documents;
+    } else{
+        return null;
+    }  
+}
+
+/**
+ * @function getDeviceLatestEvent
+ * @param {String} [id] the device id
+ * @return {Object}  the device  latestEvent or null if not found
+ * @throw {error} in case the id not sent
+ */
+function getDeviceLatestEvent(id){
+
+    if(!id){
+        throw "id is empty"
+    }
+
+    var result = eurotechStore.query(
+        {"query":'id="' + id + '" and schema = "' + latest_event_schema + '"',fields:"*"}
+    );
+
+    if(result && result.metadata.status=="success"){
+        return result.result.documents[0];
+    } else{
+        return null;
+    }  
+}
+
+/**
+ * @function getAllLatestEvents
+ * @return {Array}  all the latestEvents
+ */
+function getAllLatestEvents(){
+
+    var result = eurotechStore.query(
+        {"query":'schema = "' + latest_event_schema + '"',fields:"*"}
+    );
+
+    if(result && result.metadata.status=="success"){
+        return result.result.documents;
+    } else{
+        return null;
+    } 
+}
+
+/**
+ * @function getAllAlerts
+ * @return {Array}  all the alerts
+ */
+function getAllAlerts(resultsPerPage, pageNumber){
+
+    var result = eurotechStore.query(
+        {"query":'schema = "' + alert_schema + '"',fields:"*", "resultsPerPage": resultsPerPage, "pageNumber": pageNumber}
+    );
+
+    if(result && result.metadata.status=="success"){
+        return result.result;
+    } else{
+        return null;
+    }   
+}
+
+/**
+ * @function getTripInfo
+ * @param {String} id: deviceId
+ * @return {Object} {isNew: true/false, tripId: current trip id}
+ */
+function getTripInfo(id) {
+
+    var time = new Date().getTime();
+    var latestEvent = getDeviceLatestEvent(id);
+    if (!latestEvent) {
+
+        return {        
+
+            isNew: false,
+            tripId: 0
+        };
+    }
+    
+    var elapsedTime = time - new Date(latestEvent.lastModifiedDate).getTime();
+    return {        
+
+        isNew: elapsedTime >= config.idle_duration,
+        tripId: latestEvent.tripId ? latestEvent.tripId : 0
+    };
+}
+
+function searchAlerts(id, resultsPerPage, pageNumber){
+
+    if(!id){
+        throw "id is empty"
+    }
+
+    var result = eurotechStore.query(
+        {"query":'id like "'+id+'%" and schema = "'+alert_schema+'"',fields:"*", "resultsPerPage": resultsPerPage, "pageNumber": pageNumber}
+    );
+
+    if(result && result.metadata.status=="success"){
+        return result.result;
+    } else{
+        return null;
+    }    
+}
+
+

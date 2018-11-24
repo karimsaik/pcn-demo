@@ -1,0 +1,12 @@
+
+/**
+ * @param {String} date in ISO String format 
+ * @return {String} a date string in the following format: yyyy-MM-dd'T'HH:mm:ssZ  // e.g. 2012-04-13T13:01:02+0000
+ */
+
+function toScriptrDate(date) {
+    
+    var dateCopy = date ? new Date(date).toISOString() : new Date().toISOString();
+    dateCopy = dateCopy.substring(0, dateCopy.lastIndexOf(".")) + "+0000";
+    return dateCopy;
+}

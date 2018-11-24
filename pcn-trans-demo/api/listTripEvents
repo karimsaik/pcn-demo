@@ -1,0 +1,33 @@
+/**
+* The listTripEvents operation returns and array of the trip events of the devices recorded in the system
+* @module listTripEvents
+* @param {String} id: the device id (optional)
+* @param {Number} tripId: the trip id (optional). If specified, filters events to match the specified trip
+* @return{Array} array of historicalevents that match the id if the id is sent , all the alerts otherwise
+*
+*/
+var log = require("log");
+var deviceManager=require("../entities/deviceManager");
+
+var query = {};
+if(request.body != null){
+    query = request.body;
+}else if(request.parameters.body){
+    query = request.parameters.body;
+} else {
+    query = request.parameters;
+}
+
+if(typeof query == 'string'){
+    try{
+        query = JSON.parse(query);   
+    }catch(e){
+        log.error("/api/listTripEvents:" + e);
+    }
+}
+
+try{  
+    return deviceManager.getTripsByDevice(query.id, query.tripId);
+}catch(ex){
+    throw ex;
+}

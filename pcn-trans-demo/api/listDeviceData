@@ -1,0 +1,33 @@
+/**
+* The listDeviceData operation returns an array of the trip events of the devices recorded in the system
+* @module listDeviceData
+* @param {String} id: the device id (optional)
+* @return{Array} array of data
+*
+*/
+var log = require("log");
+var deviceManager=require("../entities/deviceManager");
+
+log.setLevel("info");
+var query = {};
+if(request.body != null){
+    query = request.body;
+}else if(request.parameters.body){
+    query = request.parameters.body;
+} else {
+    query = request.parameters;
+}
+
+if(typeof query == 'string'){
+    try{
+        query = JSON.parse(query);   
+    }catch(e){
+        log.error("/api/listDeviceData:" + e);
+    }
+}
+
+try{  
+    return deviceManager.getAllEvents(query.id);
+}catch(ex){
+    return ex;
+}

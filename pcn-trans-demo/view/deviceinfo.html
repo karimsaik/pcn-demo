@@ -1,0 +1,56 @@
+<div ng-non-bindable="">
+    <!-- begin device summary -->
+    <section class="col-xs-12 bg-white-light pdt10 pdb10 index-summary">
+        <div class="row">
+            <div class="col-xs-12 col-sm-4 text-center pdl0 pdr0">
+                <div class="icon bg-yellow">
+                    <i class="fa fa-user fa-2x text-white"></i>
+                </div>                 
+                <div class="nb bold"><span>{{marker.details.owner.value || "N/A"}}</span></div>
+                <small>Name</small>
+            </div>
+
+            <div class="col-xs-12 col-sm-4 text-center">
+                <div class="icon bg-orange">
+                    <i class="fa fa-map-marker fa-2x text-white" aria-hidden="true"></i>
+                </div>
+                <div class="nb bold"><span>{{marker.details.lat.value || "N/A"}}</span></div>
+                <div class="nb bold"><span>{{marker.details.long.value || "N/A"}}</span></div>
+                <small>Location</small>
+            </div>
+
+            <div class="col-xs-12 col-sm-4 text-center">
+                <div class="icon bg-green">
+                    <i class="fa fa-map-marker fa-2x text-white" aria-hidden="true"></i>
+                </div>
+                <div class="nb bold"><span>{{marker.details.absolutepop.value || "0"}}</span></div>
+                <small>Passengers count</small>
+            </div>   
+        </div>
+        <div class="row">
+            <div class="col-xs-12 col-sm-4 text-center">
+                <div class="icon bg-green">
+                    <i class="fa fa-map-marker fa-2x text-white" aria-hidden="true"></i>
+                </div>
+                <div class="nb bold"><span>{{marker.details.speed.value || "0"}}</span></div>
+                <small>Speed</small>
+            </div>   
+
+            <div class="col-xs-12 col-sm-4 text-center">
+                <div class="icon bg-yellow">
+                    <i class="fa fa-map-marker fa-2x text-white" aria-hidden="true"></i>
+                </div>
+                <div class="nb bold"><span>{{marker.details.absolutein.value || "0"}}</span></div>
+                <small>Passengers on</small>
+            </div>
+
+            <div class="col-xs-12 col-sm-4 text-center">
+                <div class="icon bg-yellow">
+                    <i class="fa fa-map-marker fa-2x text-white" aria-hidden="true"></i>
+                </div>
+                <div class="nb bold"><span>{{marker.details.absoluteout.value || "0"}}</span></div>
+                <small>Passengers off</small>
+            </div>
+        </div>
+    </section>        
+</div>
